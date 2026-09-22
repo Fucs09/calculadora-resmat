@@ -82,7 +82,7 @@ for index, row in df_cargas.iterrows():
 
     cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B)
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
 soma_fy, soma_fx, soma_mb_cargas = 0.0, 0.0, 0.0
 str_fx, str_fy, str_mb = "", "", ""
 
@@ -116,6 +116,8 @@ for c in cargas:
         momento = fy * (pos_b - c["pos"])
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
+        
+        # Constrói a string de forças horizontais para a memória de cálculo
         str_fx += f" {'+' if fx > 0 else '-'} {abs(fx):.2f}"
         str_fy += f" {'+' if fy > 0 else '-'} {abs(fy):.2f}"
         str_mb += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({dist_ate_b:.2f})"
@@ -128,6 +130,7 @@ dist_ab = pos_b - pos_a
 ray = -soma_mb_cargas / dist_ab if dist_ab != 0 else 0
 rb = -soma_fy - ray
 
+# Atribuição correta das reações horizontais baseada na posição do pino
 if pino_em_a:
     ha = -soma_fx
     hb = 0.0
@@ -180,22 +183,18 @@ with col_plot:
     ax_dcl.set_title("Diagrama de Corpo Livre (DCL)", fontweight='bold')
     
     def draw_support(x, type_class, label):
-        if type_class == 2: # 2º Grau (Pino fixo com hachuras)
+        if type_class == 2: 
             tri = plt.Polygon([[x, 0], [x-vao*0.02, -1.0], [x+vao*0.02, -1.0]], color='#7f8c8d', zorder=3)
             ax_dcl.add_patch(tri)
             ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.0, -1.0], color='black', linewidth=2)
-            # Desenhando as hachuras
             for hx in np.linspace(x-vao*0.025, x+vao*0.02, 5):
                 ax_dcl.plot([hx, hx-vao*0.01], [-1.0, -1.2], color='black', linewidth=1)
             return -1.3
-        
-        elif type_class == 1: # 1º Grau (Triângulo + Bolinha + Linha dupla)
-            # Triângulo um pouco mais alto e bolinha no topo
+        elif type_class == 1: 
             tri = plt.Polygon([[x, -0.2], [x-vao*0.02, -1.2], [x+vao*0.02, -1.2]], color='#7f8c8d', fill=False, linewidth=2, zorder=3)
             ax_dcl.add_patch(tri)
             circle = plt.Circle((x, -0.1), vao*0.008, color='black', fill=False, linewidth=2, zorder=4)
             ax_dcl.add_patch(circle)
-            # Linha Dupla
             ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.2, -1.2], color='black', linewidth=2)
             ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.4, -1.4], color='black', linewidth=2)
             return -1.5
@@ -255,18 +254,14 @@ with col_plot:
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='center', va='top' if rb > 0 else 'bottom', color=r_color, fontweight='bold')
 
-    # Ajuste visual da Reação Horizontal conforme a convenção do professor
+    # Renderização visual da Reação Horizontal corrigida conforme a posição do pino
     if pino_em_a and abs(ha) > 0.01:
-        # Pino em A: Seta nasce da esquerda (fora da viga) e aponta para a direita (positivo)
         ax_dcl.annotate(f"{ha:+.2f}", xy=(pos_a, -0.6), xytext=(pos_a - vao*0.12, -0.6),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='right', va='center', color=r_color, fontweight='bold')
     
     elif not pino_em_a and abs(hb) > 0.01:
-        # Pino em B: Seta nasce da direita (fora da viga) e aponta para a esquerda (positivo)
-        # O valor visual de HB é invertido (hb * -1) para que "apontar para a esquerda" seja o + padrão visual aqui
-        val_visual = hb if soma_fx <= 0 else -hb 
-        ax_dcl.annotate(f"{val_visual:+.2f}", xy=(pos_b, -0.6), xytext=(pos_b + vao*0.12, -0.6),
+        ax_dcl.annotate(f"{hb:+.2f}", xy=(pos_b, -0.6), xytext=(pos_b + vao*0.12, -0.6),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='left', va='center', color=r_color, fontweight='bold')
 
@@ -346,11 +341,12 @@ with col_plot:
         st.markdown(f"""
          **Passo 3: Impedir a Translação Horizontal**  
         Toda força horizontal aplicada na estrutura é resistida pelo apoio de 2º Grau (pino fixo), configurado na posição **{apoio_fixo_letra}**.
-        Convenção adotada: A reação horizontal é positiva (+) quando aponta "para dentro" da estrutura (da extremidade para o centro).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
+        
         if pino_em_a:
+            # Se o pino está em A, a equação exibe diretamente o ha calculado
             st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {ha:+.2f} \\, kN}}")
         else:
-            val_calc_hb = hb if soma_fx <= 0 else -hb
-            st.latex(f"H_B {str_fx} = 0 \\Rightarrow \\mathbf{{H_B = {val_calc_hb:+.2f} \\, kN}}")
+            # Se o pino está em B, invertemos o sinal algébrico na equação impressa para refletir o sentido correto no apoio direito
+            st.latex(f"H_B {str_fx.replace('+', 'TEMP').replace('-', '+').replace('TEMP', '-')} = 0 \\Rightarrow \\mathbf{{H_B = {-hb:+.2f} \\, kN}}")
