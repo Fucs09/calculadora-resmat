@@ -29,7 +29,7 @@ with col_input:
     
     dados_iniciais = pd.DataFrame({
         "Tipo": ["Pontual", "Distribuída", "Inclinada", "Momento"],
-        "Força (kN/kNm)": [6.0, -2.0, -4.0, 3.0], # Valores de exemplo ajustados
+        "Força (kN/kNm)": [6.0, -2.0, -4.0, 3.0],
         "Posição X (m)": [10.0, 12.0, 5.0, 2.0],
         "Parâmetro (m ou °)": [0.0, 4.0, 60.0, 0.0],
         "Opções (Dir/Sentido)": ["N/A", "N/A", "Esquerda", "Horário"]
@@ -49,7 +49,7 @@ with col_input:
         hide_index=True
     )
 
-# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS (Garante a Regra de Sinais Padrão)
+# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS
 cargas = []
 for index, row in df_cargas.iterrows():
     tipo = row.get("Tipo", "")
@@ -63,7 +63,6 @@ for index, row in df_cargas.iterrows():
     param = float(row.get("Parâmetro (m ou °)", 0))
     opcoes = row.get("Opções (Dir/Sentido)", "N/A")
 
-    # Tratamento especial para o sinal do Momento Fletor baseado na seleção do usuário
     if tipo == "Momento":
         if opcoes == "Horário":
             forca = -abs(forca_raw)
@@ -72,30 +71,34 @@ for index, row in df_cargas.iterrows():
         else:
             forca = forca_raw
     else:
-        forca = forca_raw # Para as demais, respeita rigorosamente o + ou - digitado
+        forca = forca_raw
 
     cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
-soma_fy, soma_fx, soma_ma_cargas = 0.0, 0.0, 0.0
-str_fx, str_fy, str_ma = "", "", ""
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B)
+soma_fy, soma_fx, soma_mb_cargas = 0.0, 0.0, 0.0
+str_fx, str_fy, str_mb = "", "", ""
 
 for c in cargas:
     if c["tipo"] == "Pontual":
         soma_fy += c["forca"]
-        momento = c["forca"] * (c["pos"] - pos_a)
-        soma_ma_cargas += momento
+        momento = c["forca"] * (c["pos"] - pos_b) # Braço em relação a B
+        soma_mb_cargas += momento
+        dist_ate_b = abs(c["pos"] - pos_b)
+        
         str_fy += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
-        str_ma += f" {'+' if momento > 0 else '-'} {abs(c['forca']):.2f} \\cdot ({c['pos'] - pos_a:.2f})"
+        str_mb += f" {'+' if momento > 0 else '-'} {abs(c['forca']):.2f} \\cdot ({dist_ate_b:.2f})"
         
     elif c["tipo"] == "Distribuída":
         forca_resultante = c["forca"] * c["param"]
         cg_distribuida = c["pos"] + (c["param"] / 2.0)
         soma_fy += forca_resultante
-        momento = forca_resultante * (cg_distribuida - pos_a)
-        soma_ma_cargas += momento
+        momento = forca_resultante * (cg_distribuida - pos_b)
+        soma_mb_cargas += momento
+        dist_ate_b = abs(cg_distribuida - pos_b)
+        
         str_fy += f" {'+' if forca_resultante > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f})"
-        str_ma += f" {'+' if momento > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f}) \\cdot ({cg_distribuida - pos_a:.2f})"
+        str_mb += f" {'+' if momento > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f}) \\cdot ({dist_ate_b:.2f})"
         
     elif c["tipo"] == "Inclinada":
         rad = np.radians(c["param"])
@@ -105,22 +108,32 @@ for c in cargas:
         
         soma_fy += fy
         soma_fx += fx
-        momento = fy * (c["pos"] - pos_a)
-        soma_ma_cargas += momento
+        momento = fy * (c["pos"] - pos_b)
+        soma_mb_cargas += momento
+        dist_ate_b = abs(c["pos"] - pos_b)
+        
         str_fx += f" {'+' if fx > 0 else '-'} {abs(fx):.2f}"
         str_fy += f" {'+' if fy > 0 else '-'} {abs(fy):.2f}"
-        str_ma += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({c['pos'] - pos_a:.2f})"
+        str_mb += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({dist_ate_b:.2f})"
         
     elif c["tipo"] == "Momento":
-        soma_ma_cargas += c["forca"]
-        str_ma += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
+        soma_mb_cargas += c["forca"]
+        str_mb += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
 
 dist_ab = pos_b - pos_a
-rb = -soma_ma_cargas / dist_ab if dist_ab != 0 else 0
-ray = -soma_fy - rb
+
+# Isolar o RAy na equação de momento em B
+# -RAy * dist_ab + soma_mb_cargas = 0  =>  RAy = soma_mb_cargas / dist_ab
+if dist_ab != 0:
+    ray = soma_mb_cargas / dist_ab
+else:
+    ray = 0
+    
+# Tendo o RAy, encontramos o RB pela translação vertical
+rb = -soma_fy - ray
 rax = -soma_fx
 
-# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas)
+# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas - Mantém a mesma lógica estática)
 X = np.linspace(0, float(vao), 1000)
 N, V, M = np.zeros_like(X), np.zeros_like(X), np.zeros_like(X)
 
@@ -183,8 +196,6 @@ with col_plot:
         forca = c["forca"]
         
         if c["tipo"] == "Pontual":
-            # Força < 0 aponta para BAIXO (seta vem de cima, y=2)
-            # Força > 0 aponta para CIMA (seta vem de baixo, y=-2)
             dy = 2 if forca < 0 else -2
             va_align = 'bottom' if forca < 0 else 'top'
             ax_dcl.annotate(f"{abs(forca)}", xy=(pos, 0), xytext=(pos, dy),
@@ -280,7 +291,7 @@ with col_plot:
 
     st.pyplot(fig)
 
-  # 5. MEMÓRIA DE CÁLCULO
+    # 5. MEMÓRIA DE CÁLCULO
     st.subheader(" Memória de Cálculo (Rastreabilidade)")
     
     with st.expander("Ver Equações e Explicação Passo a Passo", expanded=True):
@@ -291,26 +302,27 @@ with col_plot:
         
         st.markdown("---")
         st.markdown("""
-         **Passo 1: Impedir a Rotação (A Escolha do Eixo)**  
-        Na estática, o somatório de momentos pode ser feito em qualquer ponto. Escolhemos o Apoio A por conveniência matemática: como a reação $R_{Ay}$ passa exatamente por este eixo, seu "braço de alavanca" (distância) é zero, eliminando-a da equação. Assim, formamos uma equação de 1º grau apenas com a incógnita do lado oposto ($R_B$). *(Nota: Se fizéssemos $\sum M_B = 0$, isolaríamos $R_{Ay}$ primeiro com o mesmo sucesso!)*
+         **Passo 1: Impedir a Rotação (A Escolha do Eixo B)**  
+        Mantendo a padronização didática da sala de aula, escolhemos o **Apoio B** (rolete) como eixo de referência. Como a reação $R_B$ passa exatamente por este eixo, seu "braço de alavanca" (distância) é zero, eliminando-a da equação. Assim, multiplicamos as demais forças pelas suas respectivas distâncias até o ponto B, formando uma equação para encontrar primeiro o valor de $R_A$.
         """)
-        st.latex(r"\textbf{1. Equilíbrio de Momentos em A } (\sum M_A = 0)")
-        st.latex(f"R_B \\cdot ({dist_ab:.2f}) {str_ma} = 0")
-        st.latex(f"R_B = \\frac{{{-soma_ma_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_B = {rb:.2f} \\, kN}}")
+        st.latex(r"\textbf{1. Equilíbrio de Momentos em B } (\sum M_B = 0)")
+        # A reação RAy, por estar à esquerda de B, causa rotação horária (negativa)
+        st.latex(f"-R_A \\cdot ({dist_ab:.2f}) {str_mb} = 0")
+        st.latex(f"R_A = \\frac{{{soma_mb_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
         
         st.markdown("---")
         st.markdown("""
          **Passo 2: Impedir a Translação Vertical**  
-        Conhecendo $R_B$, somamos todas as forças ativas verticais (pontuais, distribuídas e componentes verticais de inclinadas) e igualamos a zero para descobrir a reação vertical remanescente ($R_{Ay}$).
+        Agora que já conhecemos o valor exato de $R_A$, somamos todas as forças ativas verticais (cargas pontuais, distribuídas e componentes verticais das inclinadas) e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$).
         """)
         st.latex(r"\textbf{2. Equilíbrio de Forças Verticais } (\sum F_y = 0)")
         st.latex(f"R_A + R_B {str_fy} = 0")
-        st.latex(f"R_A + ({rb:.2f}) + ({soma_fy:.2f}) = 0 \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
+        st.latex(f"({ray:.2f}) + R_B + ({soma_fy:.2f}) = 0 \\Rightarrow \\mathbf{{R_B = {rb:.2f} \\, kN}}")
 
         st.markdown("---")
         st.markdown("""
          **Passo 3: Impedir a Translação Horizontal**  
-        O apoio de 1ª classe (rolete) é livre para transladar lateralmente, não absorvendo esforços no eixo X. Portanto, por princípio de rigidez, toda força horizontal aplicada na estrutura é integralmente resistida pelo apoio de 2ª classe (pino fixo), que neste sistema está configurado na posição A ($H_A$).
+        O apoio de 1ª classe (rolete em B) é livre para transladar lateralmente, não absorvendo esforços no eixo X. Portanto, por princípio de rigidez, toda força horizontal aplicada na estrutura é integralmente resistida pelo apoio de 2ª classe (pino fixo), que neste sistema está configurado na posição A ($H_A$).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
         st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {rax:.2f} \\, kN}}")
