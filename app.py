@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Calculadora ResMat Naval", layout="wide", initial_sidebar_state="expanded")
-st.title(" Calculadora Estrutural - Resistência dos Materiais I")
+st.title("⚓ Calculadora Estrutural - Resistência dos Materiais I")
 st.markdown("Análise Estática e Diagramas de Esforços Internos Contínuos - FCEE / UERJ")
 
 # 2. Layout Principal
@@ -25,14 +25,14 @@ with col_input:
         pos_b = st.number_input("Posição X do Apoio B", value=float(vao), step=1.0)
 
     st.subheader("2. Matriz de Cargas Aplicadas")
-    st.markdown("Preencha a tabela. Para cargas inclinadas, defina a direção em X.")
+    st.markdown("Preencha a tabela. (+) Cima / (-) Baixo. Para Momentos, digite o valor e escolha o sentido.")
     
     dados_iniciais = pd.DataFrame({
         "Tipo": ["Pontual", "Distribuída", "Inclinada", "Momento"],
-        "Força (kN/kNm)": [-5.0, -2.0, -4.0, -3.0],
+        "Força (kN/kNm)": [6.0, -2.0, -4.0, 3.0], # Valores de exemplo ajustados
         "Posição X (m)": [10.0, 12.0, 5.0, 2.0],
         "Parâmetro (m ou °)": [0.0, 4.0, 60.0, 0.0],
-        "Direção X": ["N/A", "N/A", "Direita", "N/A"]
+        "Opções (Dir/Sentido)": ["N/A", "N/A", "Esquerda", "Horário"]
     })
 
     df_cargas = st.data_editor(
@@ -40,131 +40,125 @@ with col_input:
         num_rows="dynamic",
         column_config={
             "Tipo": st.column_config.SelectboxColumn("Tipo de Carga", options=["Pontual", "Distribuída", "Inclinada", "Momento"], required=True),
-            "Força (kN/kNm)": st.column_config.NumberColumn("Intensidade (- para baixo)", format="%.2f"),
+            "Força (kN/kNm)": st.column_config.NumberColumn("Intensidade (+ Cima / - Baixo)", format="%.2f"),
             "Posição X (m)": st.column_config.NumberColumn("Pos. X (m)", min_value=0.0),
             "Parâmetro (m ou °)": st.column_config.NumberColumn("Extensão(m) / Ângulo(°)", format="%.2f"),
-            "Direção X": st.column_config.SelectboxColumn("Direção X (Inclinada)", options=["Direita", "Esquerda", "N/A"], default="N/A")
+            "Opções (Dir/Sentido)": st.column_config.SelectboxColumn("Direção / Sentido", options=["N/A", "Direita", "Esquerda", "Horário", "Anti-horário"], default="N/A")
         },
         use_container_width=True,
         hide_index=True
     )
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
-soma_fy = 0.0
-soma_fx = 0.0
-soma_ma_cargas = 0.0
-
-str_fx, str_fy, str_ma = "", "", ""
-
+# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS (Garante a Regra de Sinais Padrão)
+cargas = []
 for index, row in df_cargas.iterrows():
     tipo = row.get("Tipo", "")
     try:
-        forca = float(row.get("Força (kN/kNm)", 0))
+        forca_raw = float(row.get("Força (kN/kNm)", 0))
     except (ValueError, TypeError): continue
-        
+    
+    if forca_raw == 0 and tipo != "Momento": continue
+    
     pos = float(row.get("Posição X (m)", 0))
     param = float(row.get("Parâmetro (m ou °)", 0))
-    direcao_x = row.get("Direção X", "N/A")
+    opcoes = row.get("Opções (Dir/Sentido)", "N/A")
 
-    if forca == 0 and tipo != "Momento": continue
+    # Tratamento especial para o sinal do Momento Fletor baseado na seleção do usuário
+    if tipo == "Momento":
+        if opcoes == "Horário":
+            forca = -abs(forca_raw)
+        elif opcoes == "Anti-horário":
+            forca = abs(forca_raw)
+        else:
+            forca = forca_raw
+    else:
+        forca = forca_raw # Para as demais, respeita rigorosamente o + ou - digitado
 
-    if tipo == "Pontual":
-        soma_fy += forca
-        momento = forca * (pos - pos_a)
+    cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
+
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
+soma_fy, soma_fx, soma_ma_cargas = 0.0, 0.0, 0.0
+str_fx, str_fy, str_ma = "", "", ""
+
+for c in cargas:
+    if c["tipo"] == "Pontual":
+        soma_fy += c["forca"]
+        momento = c["forca"] * (c["pos"] - pos_a)
         soma_ma_cargas += momento
-        str_fy += f" {'+' if forca > 0 else '-'} {abs(forca):.2f}"
-        str_ma += f" {'+' if momento > 0 else '-'} {abs(forca):.2f} \\cdot ({pos - pos_a:.2f})"
+        str_fy += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
+        str_ma += f" {'+' if momento > 0 else '-'} {abs(c['forca']):.2f} \\cdot ({c['pos'] - pos_a:.2f})"
         
-    elif tipo == "Distribuída":
-        forca_resultante = forca * param
-        cg_distribuida = pos + (param / 2.0)
+    elif c["tipo"] == "Distribuída":
+        forca_resultante = c["forca"] * c["param"]
+        cg_distribuida = c["pos"] + (c["param"] / 2.0)
         soma_fy += forca_resultante
         momento = forca_resultante * (cg_distribuida - pos_a)
         soma_ma_cargas += momento
-        str_fy += f" {'+' if forca_resultante > 0 else '-'} ({abs(forca):.2f} \\cdot {param:.2f})"
-        str_ma += f" {'+' if momento > 0 else '-'} ({abs(forca):.2f} \\cdot {param:.2f}) \\cdot ({cg_distribuida - pos_a:.2f})"
+        str_fy += f" {'+' if forca_resultante > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f})"
+        str_ma += f" {'+' if momento > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f}) \\cdot ({cg_distribuida - pos_a:.2f})"
         
-    elif tipo == "Inclinada":
-        rad = np.radians(param)
-        fy = forca * np.sin(rad)
-        fx_mag = abs(forca) * np.cos(rad)
-        fx = fx_mag if direcao_x == "Direita" else -fx_mag
+    elif c["tipo"] == "Inclinada":
+        rad = np.radians(c["param"])
+        fy = c["forca"] * np.sin(rad)
+        fx_mag = abs(c["forca"]) * np.cos(rad)
+        fx = fx_mag if c["opcoes"] == "Direita" else -fx_mag
         
         soma_fy += fy
         soma_fx += fx
-        momento = fy * (pos - pos_a)
+        momento = fy * (c["pos"] - pos_a)
         soma_ma_cargas += momento
         str_fx += f" {'+' if fx > 0 else '-'} {abs(fx):.2f}"
         str_fy += f" {'+' if fy > 0 else '-'} {abs(fy):.2f}"
-        str_ma += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({pos - pos_a:.2f})"
+        str_ma += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({c['pos'] - pos_a:.2f})"
         
-    elif tipo == "Momento":
-        soma_ma_cargas += forca
-        str_ma += f" {'+' if forca > 0 else '-'} {abs(forca):.2f}"
+    elif c["tipo"] == "Momento":
+        soma_ma_cargas += c["forca"]
+        str_ma += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
 
 dist_ab = pos_b - pos_a
 rb = -soma_ma_cargas / dist_ab if dist_ab != 0 else 0
 ray = -soma_fy - rb
 rax = -soma_fx
 
-# 3.5. DISCRETIZAÇÃO DE MACAULAY CORRIGIDA (Uso de >= para fecho em zero nas fronteiras)
+# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas)
 X = np.linspace(0, float(vao), 1000)
-N = np.zeros_like(X)
-V = np.zeros_like(X)
-M = np.zeros_like(X)
+N, V, M = np.zeros_like(X), np.zeros_like(X), np.zeros_like(X)
 
-# Inserindo Reações nos vetores com fronteira inclusiva (>=)
 V += np.where(X >= pos_a, ray, 0)
 M += np.where(X >= pos_a, ray * (X - pos_a), 0)
 N += np.where(X >= pos_a, -rax, 0) 
-
 V += np.where(X >= pos_b, rb, 0)
 M += np.where(X >= pos_b, rb * (X - pos_b), 0)
 
-# Inserindo Cargas nos vetores com fronteira inclusiva (>=)
-for index, row in df_cargas.iterrows():
-    tipo = row.get("Tipo", "")
-    try:
-        forca = float(row.get("Força (kN/kNm)", 0))
-    except (ValueError, TypeError): continue
-    pos = float(row.get("Posição X (m)", 0))
-    param = float(row.get("Parâmetro (m ou °)", 0))
-    direcao_x = row.get("Direção X", "N/A")
+for c in cargas:
+    if c["tipo"] == "Pontual":
+        V += np.where(X >= c["pos"], c["forca"], 0)
+        M += np.where(X >= c["pos"], c["forca"] * (X - c["pos"]), 0)
+    elif c["tipo"] == "Distribuída":
+        V += np.where(X >= c["pos"], c["forca"] * (X - c["pos"]), 0)
+        M += np.where(X >= c["pos"], c["forca"] * ((X - c["pos"])**2) / 2, 0)
+        fim_carga = c["pos"] + c["param"]
+        V -= np.where(X >= fim_carga, c["forca"] * (X - fim_carga), 0)
+        M -= np.where(X >= fim_carga, c["forca"] * ((X - fim_carga)**2) / 2, 0)
+    elif c["tipo"] == "Inclinada":
+        rad = np.radians(c["param"])
+        fy = c["forca"] * np.sin(rad)
+        fx_mag = abs(c["forca"]) * np.cos(rad)
+        fx = fx_mag if c["opcoes"] == "Direita" else -fx_mag
+        V += np.where(X >= c["pos"], fy, 0)
+        M += np.where(X >= c["pos"], fy * (X - c["pos"]), 0)
+        N += np.where(X >= c["pos"], -fx, 0)
+    elif c["tipo"] == "Momento":
+        M -= np.where(X >= c["pos"], c["forca"], 0)
 
-    if forca == 0 and tipo != "Momento": continue
-
-    if tipo == "Pontual":
-        V += np.where(X >= pos, forca, 0)
-        M += np.where(X >= pos, forca * (X - pos), 0)
-        
-    elif tipo == "Distribuída":
-        V += np.where(X >= pos, forca * (X - pos), 0)
-        M += np.where(X >= pos, forca * ((X - pos)**2) / 2, 0)
-        fim_carga = pos + param
-        V -= np.where(X >= fim_carga, forca * (X - fim_carga), 0)
-        M -= np.where(X >= fim_carga, forca * ((X - fim_carga)**2) / 2, 0)
-        
-    elif tipo == "Inclinada":
-        rad = np.radians(param)
-        fy = forca * np.sin(rad)
-        fx_mag = abs(forca) * np.cos(rad)
-        fx = fx_mag if direcao_x == "Direita" else -fx_mag
-        
-        V += np.where(X >= pos, fy, 0)
-        M += np.where(X >= pos, fy * (X - pos), 0)
-        N += np.where(X >= pos, -fx, 0)
-        
-    elif tipo == "Momento":
-        M -= np.where(X >= pos, forca, 0)
-
-# 4. MOTOR GRÁFICO (Matplotlib Multi-Eixos)
+# 4. MOTOR GRÁFICO 
 with col_plot:
     st.subheader("Análise Gráfica Estrutural")
 
     fig, (ax_dcl, ax_n, ax_v, ax_m) = plt.subplots(4, 1, figsize=(10, 14), gridspec_kw={'height_ratios': [2, 1, 1, 1.5]}, sharex=True)
     fig.subplots_adjust(hspace=0.3)
     
-    # DCL
+    # --- DCL ---
     ax_dcl.plot([0, vao], [0, 0], color='#2c3e50', linewidth=6, zorder=2)
     ax_dcl.set_title("Diagrama de Corpo Livre (DCL)", fontweight='bold')
     
@@ -183,44 +177,45 @@ with col_plot:
     base_a = draw_support(pos_a, 2, 'A')
     base_b = draw_support(pos_b, 1, 'B')
 
-    for index, row in df_cargas.iterrows():
-        tipo = row.get("Tipo", "")
-        try: forca = float(row.get("Força (kN/kNm)", 0))
-        except: continue
-        pos = float(row.get("Posição X (m)", 0))
-        param = float(row.get("Parâmetro (m ou °)", 0))
-        direcao_x = row.get("Direção X", "N/A")
-        
-        if forca == 0 and tipo != "Momento": continue
+    for c in cargas:
         c_color = '#e74c3c'
-
-        if tipo == "Pontual":
-            dy = -2 if forca < 0 else 2
+        pos = c["pos"]
+        forca = c["forca"]
+        
+        if c["tipo"] == "Pontual":
+            # Força < 0 aponta para BAIXO (seta vem de cima, y=2)
+            # Força > 0 aponta para CIMA (seta vem de baixo, y=-2)
+            dy = 2 if forca < 0 else -2
+            va_align = 'bottom' if forca < 0 else 'top'
             ax_dcl.annotate(f"{abs(forca)}", xy=(pos, 0), xytext=(pos, dy),
                         arrowprops=dict(facecolor=c_color, edgecolor=c_color, width=2, headwidth=7, shrink=0.0),
-                        ha='center', va='bottom' if forca < 0 else 'top', color=c_color, fontweight='bold')
+                        ha='center', va=va_align, color=c_color, fontweight='bold')
             
-        elif tipo == "Distribuída":
+        elif c["tipo"] == "Distribuída":
             altura = 1.5 if forca < 0 else -1.5
             y_base = 0 if forca < 0 else -1.5
-            rect = patches.Rectangle((pos, y_base), param, 1.5, linewidth=1, edgecolor=c_color, facecolor=c_color, alpha=0.2)
+            rect = patches.Rectangle((pos, y_base), c["param"], 1.5, linewidth=1, edgecolor=c_color, facecolor=c_color, alpha=0.2)
             ax_dcl.add_patch(rect)
-            for xs in np.linspace(pos, pos + param, int(param) + 2):
+            for xs in np.linspace(pos, pos + c["param"], int(c["param"]) + 2):
                 ax_dcl.annotate("", xy=(xs, 0), xytext=(xs, altura),
                             arrowprops=dict(facecolor=c_color, edgecolor=c_color, width=1, headwidth=5, shrink=0.0))
-            ax_dcl.text(pos + param/2, altura + (0.3 if forca < 0 else -0.3), f"{abs(forca)}", ha='center', va='center', color=c_color, fontweight='bold')
+            ax_dcl.text(pos + c["param"]/2, altura + (0.3 if forca < 0 else -0.3), f"{abs(forca)}", ha='center', va='center', color=c_color, fontweight='bold')
 
-        elif tipo == "Inclinada":
-            rad = np.radians(param)
+        elif c["tipo"] == "Inclinada":
+            rad = np.radians(c["param"])
             dy_mag = 2 * np.sin(rad)
             dx_mag = 2 * np.cos(rad)
-            dy = -dy_mag if forca < 0 else dy_mag
-            dx = dx_mag if direcao_x == "Direita" else -dx_mag
-            ax_dcl.annotate(f"{abs(forca)}", xy=(pos, 0), xytext=(pos - dx, -dy),
-                        arrowprops=dict(facecolor=c_color, edgecolor=c_color, width=2, headwidth=7, shrink=0.0),
-                        ha='right' if direcao_x == "Direita" else 'left', va='bottom' if forca < 0 else 'top', color=c_color, fontweight='bold')
             
-        elif tipo == "Momento":
+            dy = dy_mag if forca < 0 else -dy_mag
+            dx = -dx_mag if c["opcoes"] == "Direita" else dx_mag
+            va_align = 'bottom' if forca < 0 else 'top'
+            ha_align = 'right' if c["opcoes"] == "Direita" else 'left'
+            
+            ax_dcl.annotate(f"{abs(forca)}", xy=(pos, 0), xytext=(pos + dx, dy),
+                        arrowprops=dict(facecolor=c_color, edgecolor=c_color, width=2, headwidth=7, shrink=0.0),
+                        ha=ha_align, va=va_align, color=c_color, fontweight='bold')
+            
+        elif c["tipo"] == "Momento":
             sentido = "↺" if forca > 0 else "↻"
             ax_dcl.text(pos, 0.0, f"{sentido}", ha='center', va='center', color=c_color, fontweight='bold', fontsize=26)
             ax_dcl.text(pos, 0.8, f"{abs(forca)}", ha='center', va='bottom', color=c_color, fontweight='bold', fontsize=11)
@@ -253,7 +248,7 @@ with col_plot:
     ax_dcl.set_ylim(-6.5, 4.5)
     ax_dcl.axis('off')
 
-    # Normal (N)
+    # --- ESFORÇO NORMAL (N) ---
     ax_n.plot(X, N, color='#e67e22', linewidth=2)
     ax_n.fill_between(X, 0, N, where=(N >= 0), color='#e67e22', alpha=0.3)
     ax_n.fill_between(X, 0, N, where=(N < 0), color='#d35400', alpha=0.3)
@@ -261,7 +256,7 @@ with col_plot:
     ax_n.set_ylabel("Normal (N)\n[kN]", fontweight='bold')
     ax_n.grid(True, linestyle='--', alpha=0.6)
 
-    # Cortante (V)
+    # --- CORTANTE (V) ---
     ax_v.plot(X, V, color='#2980b9', linewidth=2)
     ax_v.fill_between(X, 0, V, where=(V >= 0), color='#3498db', alpha=0.3)
     ax_v.fill_between(X, 0, V, where=(V < 0), color='#e74c3c', alpha=0.3)
@@ -269,7 +264,7 @@ with col_plot:
     ax_v.set_ylabel("Cortante (V)\n[kN]", fontweight='bold')
     ax_v.grid(True, linestyle='--', alpha=0.6)
 
-    # Momento Fletor (M)
+    # --- MOMENTO FLETOR (M) ---
     ax_m.plot(X, M, color='#8e44ad', linewidth=2)
     ax_m.fill_between(X, 0, M, where=(M >= 0), color='#9b59b6', alpha=0.3)
     ax_m.fill_between(X, 0, M, where=(M < 0), color='#e74c3c', alpha=0.3)
