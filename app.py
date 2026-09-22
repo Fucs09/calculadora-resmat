@@ -20,22 +20,20 @@ with col_input:
     with col_a:
         st.markdown("**Apoio A (Esquerda)**")
         pos_a_in = st.number_input("Posição X do Apoio A", value=0.0, step=1.0)
-        vinculo_a = st.selectbox("Vínculo em A", ["Pino (2ª Classe)", "Rolete (1ª Classe)"])
+        vinculo_a = st.selectbox("Vínculo em A", ["Pino (2º Grau)", "Rolete (1º Grau)"])
     
     with col_b:
         st.markdown("**Apoio B (Direita)**")
         pos_b_in = st.number_input("Posição X do Apoio B", value=float(vao), step=1.0)
-        # O vínculo B é sempre o oposto do A na viga biapoiada simples
-        vinculo_b = "Rolete (1ª Classe)" if vinculo_a == "Pino (2ª Classe)" else "Pino (2ª Classe)"
+        vinculo_b = "Rolete (1º Grau)" if vinculo_a == "Pino (2º Grau)" else "Pino (2º Grau)"
         st.info(f"Vínculo em B: {vinculo_b}")
 
-    # Trava de Segurança: Garante que A esteja sempre à esquerda de B
     pos_a = min(pos_a_in, pos_b_in)
     pos_b = max(pos_a_in, pos_b_in)
     if pos_a_in > pos_b_in:
-        st.warning("⚠️ As posições foram invertidas automaticamente para garantir que A fique à esquerda de B.")
+        st.warning(" As posições foram invertidas automaticamente para garantir que A fique à esquerda de B.")
 
-    pino_em_a = (vinculo_a == "Pino (2ª Classe)")
+    pino_em_a = (vinculo_a == "Pino (2º Grau)")
 
     st.subheader("2. Matriz de Cargas Aplicadas")
     st.markdown("Preencha a tabela. (+) Cima / (-) Baixo. Para Momentos, digite o valor e escolha o sentido.")
@@ -62,7 +60,7 @@ with col_input:
         hide_index=True
     )
 
-# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS (Convenção: CW = +, CCW = -)
+# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS 
 cargas = []
 for index, row in df_cargas.iterrows():
     tipo = row.get("Tipo", "")
@@ -84,7 +82,7 @@ for index, row in df_cargas.iterrows():
 
     cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B)
 soma_fy, soma_fx, soma_mb_cargas = 0.0, 0.0, 0.0
 str_fx, str_fy, str_mb = "", "", ""
 
@@ -130,7 +128,6 @@ dist_ab = pos_b - pos_a
 ray = -soma_mb_cargas / dist_ab if dist_ab != 0 else 0
 rb = -soma_fy - ray
 
-# Lógica de distribuição da Reação Horizontal
 if pino_em_a:
     ha = -soma_fx
     hb = 0.0
@@ -138,17 +135,17 @@ else:
     ha = 0.0
     hb = -soma_fx
 
-# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas)
+# 3.5. DISCRETIZAÇÃO DE MACAULAY
 X = np.linspace(0, float(vao), 1000)
 N, V, M = np.zeros_like(X), np.zeros_like(X), np.zeros_like(X)
 
 V += np.where(X >= pos_a, ray, 0)
 M += np.where(X >= pos_a, ray * (X - pos_a), 0)
-N += np.where(X >= pos_a, -ha, 0)  # Aplica HA se existir
+N += np.where(X >= pos_a, -ha, 0) 
 
 V += np.where(X >= pos_b, rb, 0)
 M += np.where(X >= pos_b, rb * (X - pos_b), 0)
-N += np.where(X >= pos_b, -hb, 0)  # Aplica HB se existir
+N += np.where(X >= pos_b, -hb, 0) 
 
 for c in cargas:
     if c["tipo"] == "Pontual":
@@ -183,18 +180,26 @@ with col_plot:
     ax_dcl.set_title("Diagrama de Corpo Livre (DCL)", fontweight='bold')
     
     def draw_support(x, type_class, label):
-        tri = plt.Polygon([[x, 0], [x-vao*0.02, -1.0], [x+vao*0.02, -1.0]], color='#7f8c8d', zorder=3)
-        ax_dcl.add_patch(tri)
-        if type_class == 2:
-            ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.0, -1.0], color='black', linewidth=3)
-            return -1.0
-        elif type_class == 1:
-            ax_dcl.plot(x-vao*0.01, -1.15, marker='o', color='black', markersize=5)
-            ax_dcl.plot(x+vao*0.01, -1.15, marker='o', color='black', markersize=5)
-            ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.3, -1.3], color='black', linewidth=2)
+        if type_class == 2: # 2º Grau (Pino fixo com hachuras)
+            tri = plt.Polygon([[x, 0], [x-vao*0.02, -1.0], [x+vao*0.02, -1.0]], color='#7f8c8d', zorder=3)
+            ax_dcl.add_patch(tri)
+            ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.0, -1.0], color='black', linewidth=2)
+            # Desenhando as hachuras
+            for hx in np.linspace(x-vao*0.025, x+vao*0.02, 5):
+                ax_dcl.plot([hx, hx-vao*0.01], [-1.0, -1.2], color='black', linewidth=1)
             return -1.3
+        
+        elif type_class == 1: # 1º Grau (Triângulo + Bolinha + Linha dupla)
+            # Triângulo um pouco mais alto e bolinha no topo
+            tri = plt.Polygon([[x, -0.2], [x-vao*0.02, -1.2], [x+vao*0.02, -1.2]], color='#7f8c8d', fill=False, linewidth=2, zorder=3)
+            ax_dcl.add_patch(tri)
+            circle = plt.Circle((x, -0.1), vao*0.008, color='black', fill=False, linewidth=2, zorder=4)
+            ax_dcl.add_patch(circle)
+            # Linha Dupla
+            ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.2, -1.2], color='black', linewidth=2)
+            ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.4, -1.4], color='black', linewidth=2)
+            return -1.5
 
-    # Desenha os apoios de acordo com a escolha do usuário
     base_a = draw_support(pos_a, 2 if pino_em_a else 1, 'A')
     base_b = draw_support(pos_b, 1 if pino_em_a else 2, 'B')
 
@@ -224,12 +229,10 @@ with col_plot:
             rad = np.radians(c["param"])
             dy_mag = 2 * np.sin(rad)
             dx_mag = 2 * np.cos(rad)
-            
             dy = dy_mag if forca < 0 else -dy_mag
             dx = -dx_mag if c["opcoes"] == "Direita" else dx_mag
             va_align = 'bottom' if forca < 0 else 'top'
             ha_align = 'right' if c["opcoes"] == "Direita" else 'left'
-            
             ax_dcl.annotate(f"{abs(forca)}", xy=(pos, 0), xytext=(pos + dx, dy),
                         arrowprops=dict(facecolor=c_color, edgecolor=c_color, width=2, headwidth=7, shrink=0.0),
                         ha=ha_align, va=va_align, color=c_color, fontweight='bold')
@@ -252,29 +255,29 @@ with col_plot:
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='center', va='top' if rb > 0 else 'bottom', color=r_color, fontweight='bold')
 
-    # Renderiza o HA no apoio que for definido como Pino (A ou B)
-    if abs(ha) > 0.01:
-        start_x = pos_a - vao*0.12 if ha > 0 else pos_a + vao*0.12
-        ha_align = 'right' if ha > 0 else 'left'
-        ax_dcl.annotate(f"{abs(ha):.2f}", xy=(pos_a, base_a/2), xytext=(start_x, base_a/2),
+    # Ajuste visual da Reação Horizontal conforme a convenção do professor
+    if pino_em_a and abs(ha) > 0.01:
+        # Pino em A: Seta nasce da esquerda (fora da viga) e aponta para a direita (positivo)
+        ax_dcl.annotate(f"{ha:+.2f}", xy=(pos_a, -0.6), xytext=(pos_a - vao*0.12, -0.6),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
-                    ha=ha_align, va='center', color=r_color, fontweight='bold')
+                    ha='right', va='center', color=r_color, fontweight='bold')
     
-    if abs(hb) > 0.01:
-        start_x = pos_b - vao*0.12 if hb > 0 else pos_b + vao*0.12
-        hb_align = 'right' if hb > 0 else 'left'
-        ax_dcl.annotate(f"{abs(hb):.2f}", xy=(pos_b, base_b/2), xytext=(start_x, base_b/2),
+    elif not pino_em_a and abs(hb) > 0.01:
+        # Pino em B: Seta nasce da direita (fora da viga) e aponta para a esquerda (positivo)
+        # O valor visual de HB é invertido (hb * -1) para que "apontar para a esquerda" seja o + padrão visual aqui
+        val_visual = hb if soma_fx <= 0 else -hb 
+        ax_dcl.annotate(f"{val_visual:+.2f}", xy=(pos_b, -0.6), xytext=(pos_b + vao*0.12, -0.6),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
-                    ha=hb_align, va='center', color=r_color, fontweight='bold')
+                    ha='left', va='center', color=r_color, fontweight='bold')
 
-    y_ruler = -4.5
+    y_ruler = -5.0
     ax_dcl.annotate('', xy=(pos_a, y_ruler), xytext=(pos_b, y_ruler), arrowprops=dict(arrowstyle='<|-|>', color='#95a5a6', lw=1.5))
     ax_dcl.text((pos_a + pos_b)/2, y_ruler - 0.2, f"{dist_ab:.2f} m", ha='center', va='top', color='#95a5a6', fontweight='bold')
     ax_dcl.plot([pos_a, pos_a], [-1.5, y_ruler], color='#95a5a6', linestyle=':', lw=1.5)
     ax_dcl.plot([pos_b, pos_b], [-1.5, y_ruler], color='#95a5a6', linestyle=':', lw=1.5)
 
-    ax_dcl.set_xlim(-vao*0.1, vao + vao*0.1)
-    ax_dcl.set_ylim(-6.5, 4.5)
+    ax_dcl.set_xlim(-vao*0.15, vao + vao*0.15)
+    ax_dcl.set_ylim(-7.0, 4.5)
     ax_dcl.axis('off')
 
     # --- ESFORÇO NORMAL (N) ---
@@ -326,28 +329,28 @@ with col_plot:
         Como a reação vertical do Apoio A ($R_A$) aponta para cima à esquerda de B, ela força um giro horário, logo, **entra positiva na equação**.
         """)
         st.latex(r"\textbf{1. Equilíbrio de Momentos em B } (\sum M_B = 0)")
-        
         st.latex(f"R_A \\cdot ({dist_ab:.2f}) {str_mb} = 0")
         st.latex(f"R_A = \\frac{{{-soma_mb_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
         
         st.markdown("---")
         st.markdown("""
          **Passo 2: Impedir a Translação Vertical**  
-        Agora que já conhecemos o valor exato de $R_A$, somamos todas as forças ativas verticais (cargas pontuais, distribuídas e componentes verticais das inclinadas) e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$). Forças apontando para cima são positivas (+).
+        Somamos todas as forças ativas verticais e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$). Forças apontando para cima são positivas (+).
         """)
         st.latex(r"\textbf{2. Equilíbrio de Forças Verticais } (\sum F_y = 0)")
         st.latex(f"R_A + R_B {str_fy} = 0")
         st.latex(f"({ray:.2f}) + R_B + ({soma_fy:.2f}) = 0 \\Rightarrow \\mathbf{{R_B = {rb:.2f} \\, kN}}")
 
         st.markdown("---")
-        # Texto da Memória de Cálculo ajusta a letra A ou B dependendo da escolha do usuário
         apoio_fixo_letra = "A" if pino_em_a else "B"
         st.markdown(f"""
          **Passo 3: Impedir a Translação Horizontal**  
-        O apoio de 1ª classe (rolete) é livre para transladar lateralmente. Portanto, toda força horizontal aplicada na estrutura é resistida pelo apoio de 2ª classe (pino fixo), configurado na posição **{apoio_fixo_letra}**. Forças para a direita são positivas (+).
+        Toda força horizontal aplicada na estrutura é resistida pelo apoio de 2º Grau (pino fixo), configurado na posição **{apoio_fixo_letra}**.
+        Convenção adotada: A reação horizontal é positiva (+) quando aponta "para dentro" da estrutura (da extremidade para o centro).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
         if pino_em_a:
-            st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {ha:.2f} \\, kN}}")
+            st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {ha:+.2f} \\, kN}}")
         else:
-            st.latex(f"H_B {str_fx} = 0 \\Rightarrow \\mathbf{{H_B = {hb:.2f} \\, kN}}")
+            val_calc_hb = hb if soma_fx <= 0 else -hb
+            st.latex(f"H_B {str_fx} = 0 \\Rightarrow \\mathbf{{H_B = {val_calc_hb:+.2f} \\, kN}}")
