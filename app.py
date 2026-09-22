@@ -280,20 +280,19 @@ with col_plot:
 
     st.pyplot(fig)
 
-   # 5. MEMÓRIA DE CÁLCULO
+  # 5. MEMÓRIA DE CÁLCULO
     st.subheader(" Memória de Cálculo (Rastreabilidade)")
     
     with st.expander("Ver Equações e Explicação Passo a Passo", expanded=True):
         st.markdown("""
         **O Princípio do Equilíbrio Estático:** 
-        Para que a estrutura permaneça estática (parada), ela não pode transladar e nem rotacionar. 
-        Aplicamos as três equações fundamentais da estática de corpo rígido para descobrir as reações nos apoios:
+        Para que a estrutura permaneça estática, ela não pode transladar e nem rotacionar. Aplicamos as três equações fundamentais da estática de corpo rígido para descobrir as reações nos apoios:
         """)
         
         st.markdown("---")
         st.markdown("""
-         **Passo 1: Impedir a Rotação**  
-        Escolhemos o Apoio A (pino) como eixo de referência. Como a reação $R_A$ passa exatamente por este ponto, o seu "braço de alavanca" (distância) é zero, o que a elimina da equação. Assim, multiplicamos todas as outras forças pelas suas respectivas distâncias até o ponto A para isolar e descobrir a reação $R_B$.
+         **Passo 1: Impedir a Rotação (A Escolha do Eixo)**  
+        Na estática, o somatório de momentos pode ser feito em qualquer ponto. Escolhemos o Apoio A por conveniência matemática: como a reação $R_{Ay}$ passa exatamente por este eixo, seu "braço de alavanca" (distância) é zero, eliminando-a da equação. Assim, formamos uma equação de 1º grau apenas com a incógnita do lado oposto ($R_B$). *(Nota: Se fizéssemos $\sum M_B = 0$, isolaríamos $R_{Ay}$ primeiro com o mesmo sucesso!)*
         """)
         st.latex(r"\textbf{1. Equilíbrio de Momentos em A } (\sum M_A = 0)")
         st.latex(f"R_B \\cdot ({dist_ab:.2f}) {str_ma} = 0")
@@ -302,7 +301,7 @@ with col_plot:
         st.markdown("---")
         st.markdown("""
          **Passo 2: Impedir a Translação Vertical**  
-        Agora que já conhecemos o valor de $R_B$, somamos todas as forças ativas verticais (cargas pontuais, distribuídas e componentes verticais das inclinadas) e igualamos a zero para descobrir a reação vertical que falta no Apoio A ($R_{Ay}$).
+        Conhecendo $R_B$, somamos todas as forças ativas verticais (pontuais, distribuídas e componentes verticais de inclinadas) e igualamos a zero para descobrir a reação vertical remanescente ($R_{Ay}$).
         """)
         st.latex(r"\textbf{2. Equilíbrio de Forças Verticais } (\sum F_y = 0)")
         st.latex(f"R_A + R_B {str_fy} = 0")
@@ -311,7 +310,7 @@ with col_plot:
         st.markdown("---")
         st.markdown("""
          **Passo 3: Impedir a Translação Horizontal**  
-        O Apoio B é de 1ª classe (rolete), logo, ele é livre para deslizar e não absorve impactos laterais. Portanto, toda e qualquer força horizontal aplicada na viga (como componentes de cargas inclinadas) será integralmente resistida pelo Apoio A ($H_A$), que é um pino fixo.
+        O apoio de 1ª classe (rolete) é livre para transladar lateralmente, não absorvendo esforços no eixo X. Portanto, por princípio de rigidez, toda força horizontal aplicada na estrutura é integralmente resistida pelo apoio de 2ª classe (pino fixo), que neste sistema está configurado na posição A ($H_A$).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
         st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {rax:.2f} \\, kN}}")
