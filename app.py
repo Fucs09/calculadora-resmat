@@ -49,7 +49,7 @@ with col_input:
         hide_index=True
     )
 
-# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS
+# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS (Convenção: CW = +, CCW = -)
 cargas = []
 for index, row in df_cargas.iterrows():
     tipo = row.get("Tipo", "")
@@ -64,25 +64,28 @@ for index, row in df_cargas.iterrows():
     opcoes = row.get("Opções (Dir/Sentido)", "N/A")
 
     if tipo == "Momento":
+        # CONVENÇÃO DE SALA DE AULA: Horário (+), Anti-horário (-)
         if opcoes == "Horário":
-            forca = -abs(forca_raw)
-        elif opcoes == "Anti-horário":
             forca = abs(forca_raw)
+        elif opcoes == "Anti-horário":
+            forca = -abs(forca_raw)
         else:
             forca = forca_raw
     else:
-        forca = forca_raw
+        forca = forca_raw # Mantém + para cima, - para baixo
 
     cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B)
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B com Convenção de Sinais Ajustada)
 soma_fy, soma_fx, soma_mb_cargas = 0.0, 0.0, 0.0
 str_fx, str_fy, str_mb = "", "", ""
 
 for c in cargas:
     if c["tipo"] == "Pontual":
         soma_fy += c["forca"]
-        momento = c["forca"] * (c["pos"] - pos_b) # Braço em relação a B
+        # Nova Lógica de Braço de Alavanca (Força * (Pos_B - Pos_Carga))
+        # Isso garante que Força para baixo à esquerda de B gere momento negativo (Anti-horário)
+        momento = c["forca"] * (pos_b - c["pos"]) 
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
         
@@ -93,7 +96,7 @@ for c in cargas:
         forca_resultante = c["forca"] * c["param"]
         cg_distribuida = c["pos"] + (c["param"] / 2.0)
         soma_fy += forca_resultante
-        momento = forca_resultante * (cg_distribuida - pos_b)
+        momento = forca_resultante * (pos_b - cg_distribuida)
         soma_mb_cargas += momento
         dist_ate_b = abs(cg_distribuida - pos_b)
         
@@ -108,7 +111,7 @@ for c in cargas:
         
         soma_fy += fy
         soma_fx += fx
-        momento = fy * (c["pos"] - pos_b)
+        momento = fy * (pos_b - c["pos"])
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
         
@@ -122,18 +125,17 @@ for c in cargas:
 
 dist_ab = pos_b - pos_a
 
-# Isolar o RAy na equação de momento em B
-# -RAy * dist_ab + soma_mb_cargas = 0  =>  RAy = soma_mb_cargas / dist_ab
+# Isolar o RAy na equação de momento em B (RAy agora entra Positivo na equação!)
+# RAy * dist_ab + soma_mb_cargas = 0  =>  RAy = -soma_mb_cargas / dist_ab
 if dist_ab != 0:
-    ray = soma_mb_cargas / dist_ab
+    ray = -soma_mb_cargas / dist_ab
 else:
     ray = 0
     
-# Tendo o RAy, encontramos o RB pela translação vertical
 rb = -soma_fy - ray
 rax = -soma_fx
 
-# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas - Mantém a mesma lógica estática)
+# 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas)
 X = np.linspace(0, float(vao), 1000)
 N, V, M = np.zeros_like(X), np.zeros_like(X), np.zeros_like(X)
 
@@ -162,7 +164,8 @@ for c in cargas:
         M += np.where(X >= c["pos"], fy * (X - c["pos"]), 0)
         N += np.where(X >= c["pos"], -fx, 0)
     elif c["tipo"] == "Momento":
-        M -= np.where(X >= c["pos"], c["forca"], 0)
+        # Como CW é positivo agora, o salto no gráfico é positivo (+=)
+        M += np.where(X >= c["pos"], c["forca"], 0)
 
 # 4. MOTOR GRÁFICO 
 with col_plot:
@@ -227,7 +230,8 @@ with col_plot:
                         ha=ha_align, va=va_align, color=c_color, fontweight='bold')
             
         elif c["tipo"] == "Momento":
-            sentido = "↺" if forca > 0 else "↻"
+            # Para renderizar corretamente, pegamos o valor original digitado pelo usuário
+            sentido = "↺" if c["opcoes"] == "Anti-horário" else "↻"
             ax_dcl.text(pos, 0.0, f"{sentido}", ha='center', va='center', color=c_color, fontweight='bold', fontsize=26)
             ax_dcl.text(pos, 0.8, f"{abs(forca)}", ha='center', va='bottom', color=c_color, fontweight='bold', fontsize=11)
 
@@ -303,17 +307,20 @@ with col_plot:
         st.markdown("---")
         st.markdown("""
          **Passo 1: Impedir a Rotação (A Escolha do Eixo B)**  
-        Mantendo a padronização didática da sala de aula, escolhemos o **Apoio B** (rolete) como eixo de referência. Como a reação $R_B$ passa exatamente por este eixo, seu "braço de alavanca" (distância) é zero, eliminando-a da equação. Assim, multiplicamos as demais forças pelas suas respectivas distâncias até o ponto B, formando uma equação para encontrar primeiro o valor de $R_A$.
+        Mantendo a padronização didática, escolhemos o **Apoio B** como eixo de referência. Pela convenção de sinais, **forças que tendem a girar a estrutura no sentido horário geram momentos positivos (+)**, e no sentido anti-horário geram momentos negativos (-).
+        
+        Como a reação vertical do Apoio A ($R_A$) aponta para cima à esquerda de B, ela força um giro horário, logo, **entra positiva na equação**.
         """)
         st.latex(r"\textbf{1. Equilíbrio de Momentos em B } (\sum M_B = 0)")
-        # A reação RAy, por estar à esquerda de B, causa rotação horária (negativa)
-        st.latex(f"-R_A \\cdot ({dist_ab:.2f}) {str_mb} = 0")
-        st.latex(f"R_A = \\frac{{{soma_mb_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
+        
+        # A reação RAy entra positiva! E as forças são espelhadas pela string str_mb
+        st.latex(f"R_A \\cdot ({dist_ab:.2f}) {str_mb} = 0")
+        st.latex(f"R_A = \\frac{{{-soma_mb_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
         
         st.markdown("---")
         st.markdown("""
          **Passo 2: Impedir a Translação Vertical**  
-        Agora que já conhecemos o valor exato de $R_A$, somamos todas as forças ativas verticais (cargas pontuais, distribuídas e componentes verticais das inclinadas) e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$).
+        Agora que já conhecemos o valor exato de $R_A$, somamos todas as forças ativas verticais (cargas pontuais, distribuídas e componentes verticais das inclinadas) e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$). Forças apontando para cima são positivas (+).
         """)
         st.latex(r"\textbf{2. Equilíbrio de Forças Verticais } (\sum F_y = 0)")
         st.latex(f"R_A + R_B {str_fy} = 0")
@@ -322,7 +329,7 @@ with col_plot:
         st.markdown("---")
         st.markdown("""
          **Passo 3: Impedir a Translação Horizontal**  
-        O apoio de 1ª classe (rolete em B) é livre para transladar lateralmente, não absorvendo esforços no eixo X. Portanto, por princípio de rigidez, toda força horizontal aplicada na estrutura é integralmente resistida pelo apoio de 2ª classe (pino fixo), que neste sistema está configurado na posição A ($H_A$).
+        O apoio de 1ª classe (rolete em B) é livre para transladar lateralmente. Portanto, toda força horizontal aplicada na estrutura é resistida pelo apoio de 2ª classe (pino fixo), configurado na posição A ($H_A$). Forças para a direita são positivas (+).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
         st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {rax:.2f} \\, kN}}")
