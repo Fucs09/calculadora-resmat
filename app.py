@@ -18,11 +18,24 @@ with col_input:
     
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("**Apoio A (2ª Classe - Pino)**")
-        pos_a = st.number_input("Posição X do Apoio A", value=0.0, step=1.0)
+        st.markdown("**Apoio A (Esquerda)**")
+        pos_a_in = st.number_input("Posição X do Apoio A", value=0.0, step=1.0)
+        vinculo_a = st.selectbox("Vínculo em A", ["Pino (2ª Classe)", "Rolete (1ª Classe)"])
+    
     with col_b:
-        st.markdown("**Apoio B (1ª Classe - Rolete)**")
-        pos_b = st.number_input("Posição X do Apoio B", value=float(vao), step=1.0)
+        st.markdown("**Apoio B (Direita)**")
+        pos_b_in = st.number_input("Posição X do Apoio B", value=float(vao), step=1.0)
+        # O vínculo B é sempre o oposto do A na viga biapoiada simples
+        vinculo_b = "Rolete (1ª Classe)" if vinculo_a == "Pino (2ª Classe)" else "Pino (2ª Classe)"
+        st.info(f"Vínculo em B: {vinculo_b}")
+
+    # Trava de Segurança: Garante que A esteja sempre à esquerda de B
+    pos_a = min(pos_a_in, pos_b_in)
+    pos_b = max(pos_a_in, pos_b_in)
+    if pos_a_in > pos_b_in:
+        st.warning("⚠️ As posições foram invertidas automaticamente para garantir que A fique à esquerda de B.")
+
+    pino_em_a = (vinculo_a == "Pino (2ª Classe)")
 
     st.subheader("2. Matriz de Cargas Aplicadas")
     st.markdown("Preencha a tabela. (+) Cima / (-) Baixo. Para Momentos, digite o valor e escolha o sentido.")
@@ -56,7 +69,6 @@ for index, row in df_cargas.iterrows():
     try:
         forca_raw = float(row.get("Força (kN/kNm)", 0))
     except (ValueError, TypeError): continue
-    
     if forca_raw == 0 and tipo != "Momento": continue
     
     pos = float(row.get("Posição X (m)", 0))
@@ -64,31 +76,24 @@ for index, row in df_cargas.iterrows():
     opcoes = row.get("Opções (Dir/Sentido)", "N/A")
 
     if tipo == "Momento":
-        # CONVENÇÃO DE SALA DE AULA: Horário (+), Anti-horário (-)
-        if opcoes == "Horário":
-            forca = abs(forca_raw)
-        elif opcoes == "Anti-horário":
-            forca = -abs(forca_raw)
-        else:
-            forca = forca_raw
+        if opcoes == "Horário": forca = abs(forca_raw)
+        elif opcoes == "Anti-horário": forca = -abs(forca_raw)
+        else: forca = forca_raw
     else:
-        forca = forca_raw # Mantém + para cima, - para baixo
+        forca = forca_raw 
 
     cargas.append({"tipo": tipo, "forca": forca, "pos": pos, "param": param, "opcoes": opcoes})
 
-# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações via Somatório em B com Convenção de Sinais Ajustada)
+# 3. MOTOR MATEMÁTICO ALGÉBRICO (Reações)
 soma_fy, soma_fx, soma_mb_cargas = 0.0, 0.0, 0.0
 str_fx, str_fy, str_mb = "", "", ""
 
 for c in cargas:
     if c["tipo"] == "Pontual":
         soma_fy += c["forca"]
-        # Nova Lógica de Braço de Alavanca (Força * (Pos_B - Pos_Carga))
-        # Isso garante que Força para baixo à esquerda de B gere momento negativo (Anti-horário)
         momento = c["forca"] * (pos_b - c["pos"]) 
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
-        
         str_fy += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
         str_mb += f" {'+' if momento > 0 else '-'} {abs(c['forca']):.2f} \\cdot ({dist_ate_b:.2f})"
         
@@ -99,7 +104,6 @@ for c in cargas:
         momento = forca_resultante * (pos_b - cg_distribuida)
         soma_mb_cargas += momento
         dist_ate_b = abs(cg_distribuida - pos_b)
-        
         str_fy += f" {'+' if forca_resultante > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f})"
         str_mb += f" {'+' if momento > 0 else '-'} ({abs(c['forca']):.2f} \\cdot {c['param']:.2f}) \\cdot ({dist_ate_b:.2f})"
         
@@ -114,7 +118,6 @@ for c in cargas:
         momento = fy * (pos_b - c["pos"])
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
-        
         str_fx += f" {'+' if fx > 0 else '-'} {abs(fx):.2f}"
         str_fy += f" {'+' if fy > 0 else '-'} {abs(fy):.2f}"
         str_mb += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({dist_ate_b:.2f})"
@@ -124,16 +127,16 @@ for c in cargas:
         str_mb += f" {'+' if c['forca'] > 0 else '-'} {abs(c['forca']):.2f}"
 
 dist_ab = pos_b - pos_a
-
-# Isolar o RAy na equação de momento em B (RAy agora entra Positivo na equação!)
-# RAy * dist_ab + soma_mb_cargas = 0  =>  RAy = -soma_mb_cargas / dist_ab
-if dist_ab != 0:
-    ray = -soma_mb_cargas / dist_ab
-else:
-    ray = 0
-    
+ray = -soma_mb_cargas / dist_ab if dist_ab != 0 else 0
 rb = -soma_fy - ray
-rax = -soma_fx
+
+# Lógica de distribuição da Reação Horizontal
+if pino_em_a:
+    ha = -soma_fx
+    hb = 0.0
+else:
+    ha = 0.0
+    hb = -soma_fx
 
 # 3.5. DISCRETIZAÇÃO DE MACAULAY (Diagramas)
 X = np.linspace(0, float(vao), 1000)
@@ -141,9 +144,11 @@ N, V, M = np.zeros_like(X), np.zeros_like(X), np.zeros_like(X)
 
 V += np.where(X >= pos_a, ray, 0)
 M += np.where(X >= pos_a, ray * (X - pos_a), 0)
-N += np.where(X >= pos_a, -rax, 0) 
+N += np.where(X >= pos_a, -ha, 0)  # Aplica HA se existir
+
 V += np.where(X >= pos_b, rb, 0)
 M += np.where(X >= pos_b, rb * (X - pos_b), 0)
+N += np.where(X >= pos_b, -hb, 0)  # Aplica HB se existir
 
 for c in cargas:
     if c["tipo"] == "Pontual":
@@ -164,7 +169,6 @@ for c in cargas:
         M += np.where(X >= c["pos"], fy * (X - c["pos"]), 0)
         N += np.where(X >= c["pos"], -fx, 0)
     elif c["tipo"] == "Momento":
-        # Como CW é positivo agora, o salto no gráfico é positivo (+=)
         M += np.where(X >= c["pos"], c["forca"], 0)
 
 # 4. MOTOR GRÁFICO 
@@ -190,8 +194,9 @@ with col_plot:
             ax_dcl.plot([x-vao*0.03, x+vao*0.03], [-1.3, -1.3], color='black', linewidth=2)
             return -1.3
 
-    base_a = draw_support(pos_a, 2, 'A')
-    base_b = draw_support(pos_b, 1, 'B')
+    # Desenha os apoios de acordo com a escolha do usuário
+    base_a = draw_support(pos_a, 2 if pino_em_a else 1, 'A')
+    base_b = draw_support(pos_b, 1 if pino_em_a else 2, 'B')
 
     for c in cargas:
         c_color = '#e74c3c'
@@ -230,7 +235,6 @@ with col_plot:
                         ha=ha_align, va=va_align, color=c_color, fontweight='bold')
             
         elif c["tipo"] == "Momento":
-            # Para renderizar corretamente, pegamos o valor original digitado pelo usuário
             sentido = "↺" if c["opcoes"] == "Anti-horário" else "↻"
             ax_dcl.text(pos, 0.0, f"{sentido}", ha='center', va='center', color=c_color, fontweight='bold', fontsize=26)
             ax_dcl.text(pos, 0.8, f"{abs(forca)}", ha='center', va='bottom', color=c_color, fontweight='bold', fontsize=11)
@@ -241,17 +245,27 @@ with col_plot:
         ax_dcl.annotate(f"{abs(ray):.2f}", xy=(pos_a, base_a), xytext=(pos_a, start_y),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='center', va='top' if ray > 0 else 'bottom', color=r_color, fontweight='bold')
-    if abs(rax) > 0.01:
-        start_x = pos_a - vao*0.12 if rax > 0 else pos_a + vao*0.12
-        ha_align = 'right' if rax > 0 else 'left'
-        ax_dcl.annotate(f"{abs(rax):.2f}", xy=(pos_a, base_a/2), xytext=(start_x, base_a/2),
-                    arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
-                    ha=ha_align, va='center', color=r_color, fontweight='bold')
+    
     if abs(rb) > 0.01:
         start_y = base_b - 2.5 if rb > 0 else base_b + 2.5
         ax_dcl.annotate(f"{abs(rb):.2f}", xy=(pos_b, base_b), xytext=(pos_b, start_y),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='center', va='top' if rb > 0 else 'bottom', color=r_color, fontweight='bold')
+
+    # Renderiza o HA no apoio que for definido como Pino (A ou B)
+    if abs(ha) > 0.01:
+        start_x = pos_a - vao*0.12 if ha > 0 else pos_a + vao*0.12
+        ha_align = 'right' if ha > 0 else 'left'
+        ax_dcl.annotate(f"{abs(ha):.2f}", xy=(pos_a, base_a/2), xytext=(start_x, base_a/2),
+                    arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
+                    ha=ha_align, va='center', color=r_color, fontweight='bold')
+    
+    if abs(hb) > 0.01:
+        start_x = pos_b - vao*0.12 if hb > 0 else pos_b + vao*0.12
+        hb_align = 'right' if hb > 0 else 'left'
+        ax_dcl.annotate(f"{abs(hb):.2f}", xy=(pos_b, base_b/2), xytext=(start_x, base_b/2),
+                    arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
+                    ha=hb_align, va='center', color=r_color, fontweight='bold')
 
     y_ruler = -4.5
     ax_dcl.annotate('', xy=(pos_a, y_ruler), xytext=(pos_b, y_ruler), arrowprops=dict(arrowstyle='<|-|>', color='#95a5a6', lw=1.5))
@@ -313,7 +327,6 @@ with col_plot:
         """)
         st.latex(r"\textbf{1. Equilíbrio de Momentos em B } (\sum M_B = 0)")
         
-        # A reação RAy entra positiva! E as forças são espelhadas pela string str_mb
         st.latex(f"R_A \\cdot ({dist_ab:.2f}) {str_mb} = 0")
         st.latex(f"R_A = \\frac{{{-soma_mb_cargas:.2f}}}{{{dist_ab:.2f}}} \\Rightarrow \\mathbf{{R_A = {ray:.2f} \\, kN}}")
         
@@ -327,9 +340,14 @@ with col_plot:
         st.latex(f"({ray:.2f}) + R_B + ({soma_fy:.2f}) = 0 \\Rightarrow \\mathbf{{R_B = {rb:.2f} \\, kN}}")
 
         st.markdown("---")
-        st.markdown("""
+        # Texto da Memória de Cálculo ajusta a letra A ou B dependendo da escolha do usuário
+        apoio_fixo_letra = "A" if pino_em_a else "B"
+        st.markdown(f"""
          **Passo 3: Impedir a Translação Horizontal**  
-        O apoio de 1ª classe (rolete em B) é livre para transladar lateralmente. Portanto, toda força horizontal aplicada na estrutura é resistida pelo apoio de 2ª classe (pino fixo), configurado na posição A ($H_A$). Forças para a direita são positivas (+).
+        O apoio de 1ª classe (rolete) é livre para transladar lateralmente. Portanto, toda força horizontal aplicada na estrutura é resistida pelo apoio de 2ª classe (pino fixo), configurado na posição **{apoio_fixo_letra}**. Forças para a direita são positivas (+).
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
-        st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {rax:.2f} \\, kN}}")
+        if pino_em_a:
+            st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {ha:.2f} \\, kN}}")
+        else:
+            st.latex(f"H_B {str_fx} = 0 \\Rightarrow \\mathbf{{H_B = {hb:.2f} \\, kN}}")
