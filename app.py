@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Calculadora ResMat Naval", layout="wide", initial_sidebar_state="expanded")
-st.title(" Calculadora Estrutural - Resistência dos Materiais I")
+st.title("⚓ Calculadora Estrutural - Resistência dos Materiais I")
 st.markdown("Análise Estática e Diagramas de Esforços Internos Contínuos - FCEE / UERJ")
 
 # 2. Layout Principal
@@ -31,19 +31,27 @@ with col_input:
     pos_a = min(pos_a_in, pos_b_in)
     pos_b = max(pos_a_in, pos_b_in)
     if pos_a_in > pos_b_in:
-        st.warning(" As posições foram invertidas automaticamente para garantir que A fique à esquerda de B.")
+        st.warning("⚠️ As posições foram invertidas automaticamente para garantir que A fique à esquerda de B.")
 
     pino_em_a = (vinculo_a == "Pino (2º Grau)")
 
     st.subheader("2. Matriz de Cargas Aplicadas")
     st.markdown("Preencha a tabela. (+) Cima / (-) Baixo. Para Momentos, digite o valor e escolha o sentido.")
     
+    # Criando 20 linhas para garantir margem de segurança
+    num_linhas = 20
+    tipos = ["Pontual", "Distribuída", "Inclinada", "Momento"] + [None] * (num_linhas - 4)
+    forcas = [6.0, -2.0, -4.0, 3.0] + [None] * (num_linhas - 4)
+    pos = [10.0, 12.0, 5.0, 2.0] + [None] * (num_linhas - 4)
+    params = [0.0, 4.0, 60.0, 0.0] + [None] * (num_linhas - 4)
+    opcoes = ["N/A", "N/A", "Esquerda", "Horário"] + ["N/A"] * (num_linhas - 4)
+
     dados_iniciais = pd.DataFrame({
-        "Tipo": ["Pontual", "Distribuída", "Inclinada", "Momento"],
-        "Força (kN/kNm)": [6.0, -2.0, -4.0, 3.0],
-        "Posição X (m)": [10.0, 12.0, 5.0, 2.0],
-        "Parâmetro (m ou °)": [0.0, 4.0, 60.0, 0.0],
-        "Opções (Dir/Sentido)": ["N/A", "N/A", "Esquerda", "Horário"]
+        "Tipo": tipos,
+        "Força (kN/kNm)": forcas,
+        "Posição X (m)": pos,
+        "Parâmetro (m ou °)": params,
+        "Opções (Dir/Sentido)": opcoes
     })
 
     df_cargas = st.data_editor(
@@ -60,18 +68,36 @@ with col_input:
         hide_index=True
     )
 
-# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS 
+# 2.5 PRÉ-PROCESSAMENTO DAS CARGAS (Com blindagem contra células vazias)
 cargas = []
 for index, row in df_cargas.iterrows():
-    tipo = row.get("Tipo", "")
+    tipo = row.get("Tipo")
+    # Ignora a linha se o Tipo não estiver preenchido
+    if pd.isna(tipo) or tipo is None or tipo == "": 
+        continue
+        
     try:
-        forca_raw = float(row.get("Força (kN/kNm)", 0))
-    except (ValueError, TypeError): continue
-    if forca_raw == 0 and tipo != "Momento": continue
+        forca_val = row.get("Força (kN/kNm)")
+        # Ignora a linha se a Força não estiver preenchida
+        if pd.isna(forca_val):
+            continue
+        forca_raw = float(forca_val)
+    except (ValueError, TypeError): 
+        continue
+        
+    if forca_raw == 0 and tipo != "Momento": 
+        continue
     
-    pos = float(row.get("Posição X (m)", 0))
-    param = float(row.get("Parâmetro (m ou °)", 0))
-    opcoes = row.get("Opções (Dir/Sentido)", "N/A")
+    # Tratamento seguro para valores vazios em posição e parâmetro
+    pos_val = row.get("Posição X (m)")
+    pos = float(pos_val) if pd.notna(pos_val) else 0.0
+    
+    param_val = row.get("Parâmetro (m ou °)")
+    param = float(param_val) if pd.notna(param_val) else 0.0
+    
+    opcoes = row.get("Opções (Dir/Sentido)")
+    if pd.isna(opcoes): 
+        opcoes = "N/A"
 
     if tipo == "Momento":
         if opcoes == "Horário": forca = abs(forca_raw)
@@ -117,7 +143,6 @@ for c in cargas:
         soma_mb_cargas += momento
         dist_ate_b = abs(c["pos"] - pos_b)
         
-        # Constrói a string de forças horizontais para a memória de cálculo
         str_fx += f" {'+' if fx > 0 else '-'} {abs(fx):.2f}"
         str_fy += f" {'+' if fy > 0 else '-'} {abs(fy):.2f}"
         str_mb += f" {'+' if momento > 0 else '-'} {abs(fy):.2f} \\cdot ({dist_ate_b:.2f})"
@@ -130,7 +155,6 @@ dist_ab = pos_b - pos_a
 ray = -soma_mb_cargas / dist_ab if dist_ab != 0 else 0
 rb = -soma_fy - ray
 
-# Atribuição correta das reações horizontais baseada na posição do pino
 if pino_em_a:
     ha = -soma_fx
     hb = 0.0
@@ -254,7 +278,6 @@ with col_plot:
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
                     ha='center', va='top' if rb > 0 else 'bottom', color=r_color, fontweight='bold')
 
-    # Renderização visual da Reação Horizontal corrigida conforme a posição do pino
     if pino_em_a and abs(ha) > 0.01:
         ax_dcl.annotate(f"{ha:+.2f}", xy=(pos_a, -0.6), xytext=(pos_a - vao*0.12, -0.6),
                     arrowprops=dict(facecolor=r_color, edgecolor=r_color, width=2, headwidth=7, shrink=0.0),
@@ -308,7 +331,7 @@ with col_plot:
     st.pyplot(fig)
 
     # 5. MEMÓRIA DE CÁLCULO
-    st.subheader(" Memória de Cálculo (Rastreabilidade)")
+    st.subheader("📝 Memória de Cálculo (Rastreabilidade)")
     
     with st.expander("Ver Equações e Explicação Passo a Passo", expanded=True):
         st.markdown("""
@@ -318,7 +341,7 @@ with col_plot:
         
         st.markdown("---")
         st.markdown("""
-         **Passo 1: Impedir a Rotação (A Escolha do Eixo B)**  
+        👉 **Passo 1: Impedir a Rotação (A Escolha do Eixo B)**  
         Mantendo a padronização didática, escolhemos o **Apoio B** como eixo de referência. Pela convenção de sinais, **forças que tendem a girar a estrutura no sentido horário geram momentos positivos (+)**, e no sentido anti-horário geram momentos negativos (-).
         
         Como a reação vertical do Apoio A ($R_A$) aponta para cima à esquerda de B, ela força um giro horário, logo, **entra positiva na equação**.
@@ -329,7 +352,7 @@ with col_plot:
         
         st.markdown("---")
         st.markdown("""
-         **Passo 2: Impedir a Translação Vertical**  
+        👉 **Passo 2: Impedir a Translação Vertical**  
         Somamos todas as forças ativas verticais e igualamos a zero para descobrir a reação vertical remanescente no apoio B ($R_B$). Forças apontando para cima são positivas (+).
         """)
         st.latex(r"\textbf{2. Equilíbrio de Forças Verticais } (\sum F_y = 0)")
@@ -339,14 +362,12 @@ with col_plot:
         st.markdown("---")
         apoio_fixo_letra = "A" if pino_em_a else "B"
         st.markdown(f"""
-         **Passo 3: Impedir a Translação Horizontal**  
+        👉 **Passo 3: Impedir a Translação Horizontal**  
         Toda força horizontal aplicada na estrutura é resistida pelo apoio de 2º Grau (pino fixo), configurado na posição **{apoio_fixo_letra}**.
         """)
         st.latex(r"\textbf{3. Equilíbrio de Forças Horizontais } (\sum F_x = 0)")
         
         if pino_em_a:
-            # Se o pino está em A, a equação exibe diretamente o ha calculado
             st.latex(f"H_A {str_fx} = 0 \\Rightarrow \\mathbf{{H_A = {ha:+.2f} \\, kN}}")
         else:
-            # Se o pino está em B, invertemos o sinal algébrico na equação impressa para refletir o sentido correto no apoio direito
             st.latex(f"H_B {str_fx.replace('+', 'TEMP').replace('-', '+').replace('TEMP', '-')} = 0 \\Rightarrow \\mathbf{{H_B = {-hb:+.2f} \\, kN}}")
